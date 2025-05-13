@@ -49,7 +49,7 @@ df = pd.DataFrame(
 )
 
 # ──────────────────── 3. 사이드바(매장 선택) ───────────── #
-st.sidebar.header("📍 매장을 선택하면 지도가 이동해요!")
+st.sidebar.header("📍 선애랑 가볼 곳!(임시)")
 choice = st.sidebar.radio(
     label="🍴 부천 핫플 리스트",
     options=df["name"],
