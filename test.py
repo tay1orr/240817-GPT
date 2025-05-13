@@ -1,106 +1,89 @@
-# 🍽️✨ 부천 핫플 맛집·카페 MAP (클릭→지도 이동 & 블로그 리뷰) ✨🍰
-# 실행: streamlit run bucheon_food_map.py
-# 필요: pip install streamlit pydeck pandas
 import streamlit as st
-import pandas as pd
-import pydeck as pdk
+import openai
+import streamlit.components.v1 as components
+import time
 
-# ──────────────────── 1. 페이지 설정 ──────────────────── #
-st.set_page_config(page_title="부천 핫플 MAP", page_icon="🍽️", layout="wide")
+# OpenAI API 키 설정
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-# ──────────────────── 2. 데이터 ───────────────────────── #
-PLACES = [
-    # name, category, address, lat, lon, blog
-    # 코르드블랭크 💖  :contentReference[oaicite:0]{index=0}
-    ("코르드블랭크", "브런치 카페 🥞",
-     "경기도 부천시 오정구 까치로6번길 17-12",
-     37.507313, 126.809723,
-     "https://blog.naver.com/kyunglim7575/223559832112"),
-    # 앤드 티카페 🫖  :contentReference[oaicite:1]{index=1}
-    ("앤드", "티 전문 카페 🍵",
-     "경기도 부천시 오정구 까치로6번길 40",
-     37.507410, 126.808624,
-     "https://blog.naver.com/astre1102/223444017901"),
-    # 숲숲 🌿  :contentReference[oaicite:2]{index=2}
-    ("숲숲", "플랜트 카페 🌿",
-     "경기도 부천시 오정구 까치로6번길 36",
-     37.506759, 126.810326,
-     "https://blog.naver.com/gpwls0697/223560863177"),
-    # 리틀 시칠리 🍝  :contentReference[oaicite:3]{index=3}
-    ("리틀 시칠리", "가성비 파스타 🍝",
-     "경기도 부천시 원미구 길주로 80",
-     37.504994, 126.752435,
-     "https://blog.naver.com/gamzaman_2/223526429806"),
-    # 뽁식당 부천점 🍲  :contentReference[oaicite:4]{index=4}
-    ("뽁식당 부천점", "로제·리조또 🍲",
-     "경기도 부천시 원미구 석천로177번길 36",
-     37.503636, 126.761052,
-     "https://blog.naver.com/mmiiit/223534121543"),
-    # 명가 진흙구이 🦆  :contentReference[oaicite:5]{index=5}
-    ("명가 진흙구이", "오리·백숙 🦆",
-     "경기도 부천시 오정구 소사로 599",
-     37.511505, 126.798433,
-     "https://blog.naver.com/1121jisu/223337209891"),
-]
+st.title("생성형 AI를 활용한 나만의 웹 앱 프로그래밍 241017")
 
-df = pd.DataFrame(
-    PLACES,
-    columns=["name", "category", "address", "lat", "lon", "blog"]
-)
+# 세션 상태에서 'messages' 초기화
+if 'messages' not in st.session_state:
+    st.session_state['messages'] = [
+        {"role": "system", "content": "You are a helpful assistant."}
+    ]
 
-# ──────────────────── 3. 사이드바(매장 선택) ───────────── #
-st.sidebar.header("📍 선애랑 가볼 곳!(임시)")
-choice = st.sidebar.radio(
-    label="🍴 부천 핫플 리스트",
-    options=df["name"],
-    format_func=lambda x: f"{x} ({df.loc[df['name']==x,'category'].values[0]})",
-)
+# 처음 모델 이름을 포함할지 여부를 세션 상태에서 관리
+if 'include_model_name' not in st.session_state:
+    st.session_state['include_model_name'] = True
 
-# 선택한 매장의 데이터
-row = df[df["name"] == choice].iloc[0]
-sel_lat, sel_lon = row["lat"], row["lon"]
+def send_message():
+    user_message = st.session_state.user_input
+    if user_message:
+        # 사용자 메시지를 세션 상태에 추가 (전체 대화 히스토리 유지)
+        st.session_state['messages'].append({"role": "user", "content": user_message})
 
-# ──────────────────── 4. 지도 그리기 ─────────────────── #
-layer_all = pdk.Layer(
-    "ScatterplotLayer",
-    df,
-    get_position="[lon, lat]",
-    get_radius=120,
-    get_fill_color="[255,0,127,160]",
-    pickable=True,
-)
+        # 로딩 메시지 표시
+        with st.spinner("모델이 응답을 생성 중입니다..."):
+            # OpenAI Chat API 호출
+            try:
+                response = openai.ChatCompletion.create(
+                    model="gpt-4o-mini",  # 모델 설정
+                    messages=st.session_state['messages'],  # 전체 대화 히스토리 전달
+                    max_tokens=2048  # 토큰 수 유지
+                )
+                # 어시스턴트의 응답을 추출
+                assistant_message = response['choices'][0]['message']['content']
 
-layer_selected = pdk.Layer(
-    "ScatterplotLayer",
-    pd.DataFrame([row]),
-    get_position="[lon, lat]",
-    get_radius=250,
-    get_fill_color="[0,255,127,200]",
-)
+                # 첫 번째 응답에만 모델 이름 포함
+                if st.session_state['include_model_name']:
+                    model_used = response['model']
+                    final_message = f"(모델: {model_used})\n{assistant_message}"
+                    st.session_state['include_model_name'] = False  # 이후에는 모델 이름 제외
+                else:
+                    final_message = assistant_message
 
-view_state = pdk.ViewState(latitude=sel_lat, longitude=sel_lon, zoom=14, pitch=45)
+                # 어시스턴트 응답을 세션 상태에 추가
+                st.session_state['messages'].append({"role": "assistant", "content": final_message})
+            except Exception as e:
+                st.error(f"API 호출 중 오류가 발생했습니다: {e}")
 
-st.pydeck_chart(
-    pdk.Deck(
-        map_style="mapbox://styles/mapbox/streets-v12",
-        initial_view_state=view_state,
-        layers=[layer_all, layer_selected],
-        tooltip={"text": "{name}\n{category}\n{address}"},
-    )
-)
+        # 입력 필드를 초기화
+        st.session_state.user_input = ""
 
-# ──────────────────── 5. 상세 정보 ───────────────────── #
-st.markdown("## 📌 선택한 매장 정보")
-st.write(f"**{row['name']} — {row['category']}**")
-st.write(f"🏠 주소: {row['address']}")
-st.write(f"🛰️ 위·경도: {sel_lat:.6f}, {sel_lon:.6f}")
-st.markdown(
-    f"[🗺️ 카카오지도 길찾기](https://map.kakao.com/?q={row['address']})",
-    unsafe_allow_html=True,
-)
-st.markdown(
-    f"[🔗 네이버 블로그 리뷰 보기]({row['blog']})",
-    unsafe_allow_html=True,
-)
+        # 스크롤을 맨 아래로 이동하도록 트리거하기 위해 빈 상태를 업데이트
+        st.session_state['scroll_to_bottom'] = True
 
-st.caption("※ 본 앱은 **교육 목적** 예시입니다. 방문 전 영업시간·휴무일을 확인하세요!")
+# 메시지를 출력하여 최신 메시지가 하단에 위치하도록 함
+for message in st.session_state['messages']:
+    if message['role'] == 'user':
+        st.markdown(
+            f"<div style='background-color: #d1e7dd; padding: 10px; border-radius: 5px; margin-bottom: 5px;'>User:</div>",
+            unsafe_allow_html=True
+        )
+        st.code(message['content'], language="python")
+    else:
+        st.markdown(
+            f"<div style='background-color: #f8d7da; padding: 10px; border-radius: 5px; margin-bottom: 5px;'>Assistant:</div>",
+            unsafe_allow_html=True
+        )
+        # 응답 메시지 표시
+        st.markdown(message['content'])
+    st.markdown("---")
+
+# 사용자 입력 받기 (항상 페이지 하단에 위치)
+st.text_input("User:", key="user_input", on_change=send_message)
+
+# JavaScript를 사용하여 자동 스크롤
+if 'scroll_to_bottom' in st.session_state:
+    scroll_script = """
+    <script>
+    var chatContainer = window.parent.document.getElementsByClassName('main')[0];
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+    </script>
+    """
+    components.html(scroll_script)
+
+    # 스크롤 후 상태를 초기화
+    st.session_state['scroll_to_bottom'] = False
